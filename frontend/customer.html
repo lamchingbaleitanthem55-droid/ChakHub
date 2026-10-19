@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChakHub – Order food</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="css/customer.css">
+</head>
+<body>
+<div id="offline" class="offline hidden"><i class="fa-solid fa-wifi"></i> You're offline. Reconnect to continue.</div>
+<header class="top">
+  <a class="brand" href="#/"><span id="brand-logo"><i class="fa-solid fa-bowl-food"></i></span> <span id="brand-name">ChakHub</span></a>
+  <div class="loc"><i class="fa-solid fa-location-dot"></i> Imphal, Manipur</div>
+  <a class="icon-btn" href="#/orders" aria-label="My orders"><i class="fa-solid fa-receipt"></i></a>
+  <a class="icon-btn cartlink" href="#/notifications" aria-label="Notifications"><i class="fa-solid fa-bell"></i><span class="bell-count hidden" id="bell"></span></a>
+  <a class="icon-btn cartlink" href="#/cart" aria-label="Cart"><i class="fa-solid fa-bag-shopping"></i><span class="cart-count hidden"></span></a>
+  <div class="menu-wrap">
+    <button class="icon-btn" id="profile-btn" aria-label="Profile"><i class="fa-solid fa-user"></i></button>
+    <div class="dropdown hidden" id="profile-menu">
+      <strong id="me-name"></strong><span id="me-email"></span>
+      <a class="btn-line" href="#/profile" style="text-align:center">My profile</a>
+      <button class="btn-line" id="logout-btn"><i class="fa-solid fa-right-from-bracket"></i> Log out</button>
+    </div>
+  </div>
+</header>
+<main id="view" class="wrap"></main>
+<nav class="bottom">
+  <a href="#/"><i class="fa-solid fa-house"></i>Home</a>
+  <button id="nav-search"><i class="fa-solid fa-magnifying-glass"></i>Search</button>
+  <a href="#/orders"><i class="fa-solid fa-receipt"></i>Orders</a>
+  <a href="#/cart" class="cartlink"><i class="fa-solid fa-bag-shopping"></i>Cart<span class="cart-count hidden"></span></a>
+  <button id="nav-profile"><i class="fa-solid fa-user"></i>Profile</button>
+</nav>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="js/app.js"></script>
+<script src="js/cart.js"></script>
+<script src="js/customer.js"></script>
+</body>
+</html>

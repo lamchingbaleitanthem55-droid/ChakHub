@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChakHub – Food delivery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="offline" class="offline hidden"><i class="fa-solid fa-wifi"></i> You're offline. Reconnect to continue.</div>
+<main class="shell">
+  <section class="pitch">
+    <div class="logo"><i class="fa-solid fa-bowl-food"></i> ChakHub</div>
+    <h1>Hot food, at your door.</h1>
+    <p>Order from restaurants near you and watch it arrive.</p>
+  </section>
+  <section class="panel">
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-login" aria-selected="true">Log in</button>
+      <button role="tab" id="tab-register" aria-selected="false">Sign up</button>
+    </div>
+    <form id="login-form">
+      <label>Email<input name="email" type="email" autocomplete="email" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="btn" type="submit">Log in</button>
+      <button class="link" type="button" id="forgot-btn">Forgot password?</button>
+    </form>
+    <form id="reset-form" class="hidden">
+      <h3 style="margin:0">Set a new password</h3>
+      <label>New password (8+ characters)<input name="password" type="password" autocomplete="new-password" required minlength="8"></label>
+      <button class="btn" type="submit">Save password</button>
+    </form>
+    <form id="register-form" class="hidden">
+      <label>Account type
+        <select name="accountType" id="account-type">
+          <option value="customer">I want to order food</option>
+          <option value="delivery">I want to deliver orders</option>
+        </select>
+      </label>
+      <label>Full name<input name="name" autocomplete="name" required minlength="2"></label>
+      <label>Email<input name="email" type="email" autocomplete="email" required></label>
+      <label>Phone<input name="phone" type="tel" autocomplete="tel" placeholder="9876543210" required></label>
+      <label id="vehicle-wrap" class="hidden">Vehicle
+        <select name="vehicleType"><option value="bike">Motorbike</option><option value="scooter">Scooter</option><option value="bicycle">Bicycle</option></select>
+      </label>
+      <label>Password (8+ characters)<input name="password" type="password" autocomplete="new-password" required minlength="8"></label>
+      <button class="btn" type="submit">Create account</button>
+    </form>
+  </section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="js/app.js"></script>
+<script src="js/auth.js"></script>
+</body>
+</html>
