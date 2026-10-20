@@ -65,7 +65,7 @@ const restSchema = z.object({
   name: z.string().trim().min(2).max(100), description: z.string().trim().max(400).optional(), address: z.string().trim().min(3).max(300),
   latitude: z.number().min(-90).max(90).nullable().optional(), longitude: z.number().min(-180).max(180).nullable().optional(),
   phone: z.string().trim().max(20).optional(), image: httpsImg.optional(), cuisine: z.array(z.string().trim().min(1).max(30)).max(8),
-  opening_time: hhmm, closing_time: hhmm, delivery_fee: z.number().min(0).max(500), is_veg: z.boolean().optional(), status: z.enum(['active', 'inactive']).optional(),
+  zone_id: z.string().uuid().nullable().optional(), opening_time: hhmm, closing_time: hhmm, delivery_fee: z.number().min(0).max(500), is_veg: z.boolean().optional(), status: z.enum(['active', 'inactive']).optional(),
 });
 
 router.get('/restaurants', wrap(async (req, res) => res.json({ restaurants: ok(await supabase.from('restaurants').select('*').order('created_at', { ascending: false })) })));
@@ -170,11 +170,52 @@ router.get('/customers/:id/orders', uuid, wrap(async (req, res) =>
 
 // ---------- Delivery partners ----------
 router.get('/partners', wrap(async (req, res) =>
-  res.json({ partners: ok(await supabase.from('delivery_partners').select('id,vehicle_type,vehicle_number,approval_status,availability,current_latitude,current_longitude,users(name,email,phone,status)').order('approval_status')) })));
+  res.json({ partners: ok(await supabase.from('delivery_partners').select('id,vehicle_type,vehicle_number,approval_status,availability,current_latitude,current_longitude,rider_zones(zone_id),users(name,email,phone,status)').order('approval_status')) })));
 router.patch('/partners/:id', uuid, validate(z.object({ approval_status: z.enum(['approved', 'rejected', 'suspended', 'pending']) })), wrap(async (req, res) => {
   const patch = { approval_status: req.body.approval_status };
   if (patch.approval_status !== 'approved') patch.availability = 'offline'; // can’t stay online once not approved
   ok(await supabase.from('delivery_partners').update(patch).eq('id', req.params.id));
+  res.json({ ok: true });
+}));
+
+// ---------- Delivery zones ----------
+router.get('/zones', wrap(async (req, res) => {
+  const [zs, rs, rz] = await Promise.all([
+    supabase.from('zones').select('id,name,latitude,longitude,radius_km,created_at').order('name').then(ok),
+    supabase.from('restaurants').select('zone_id').not('zone_id', 'is', null).then(ok),
+    supabase.from('rider_zones').select('zone_id').then(ok),
+  ]);
+  const n = (rows, id) => rows.filter((x) => x.zone_id === id).length;
+  res.json({ zones: zs.map((x) => ({ ...x, restaurants: n(rs, x.id), riders: n(rz, x.id) })) });
+}));
+const zoneBase = z.object({ name: z.string().trim().min(2).max(40), latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(), radius_km: z.number().min(0.1).max(50).nullable().optional() });
+const centreOk = (v) => (v.latitude == null) === (v.longitude == null); // a centre needs both numbers
+const zoneSchema = zoneBase.refine(centreOk, 'Pick the zone centre on the map');
+const zonePatch = zoneBase.partial().refine(centreOk, 'Pick the zone centre on the map');
+router.post('/zones', validate(zoneSchema), wrap(async (req, res) => {
+  const r = await supabase.from('zones').insert(req.body).select().single();
+  if (r.error?.code === '23505') throw fail('A zone with this name already exists', 409);
+  if (r.error) throw r.error;
+  res.status(201).json({ zone: r.data });
+}));
+router.patch('/zones/:id', uuid, validate(zonePatch), wrap(async (req, res) => {
+  const r = await supabase.from('zones').update(req.body).eq('id', req.params.id);
+  if (r.error?.code === '23505') throw fail('A zone with this name already exists', 409);
+  if (r.error) throw r.error;
+  res.json({ ok: true });
+}));
+router.delete('/zones/:id', uuid, wrap(async (req, res) => { // restaurants in it become "no zone"; riders lose it
+  ok(await supabase.from('zones').delete().eq('id', req.params.id));
+  res.json({ ok: true });
+}));
+router.patch('/partners/:id/zones', uuid, validate(z.object({ zone_ids: z.array(z.string().uuid()).max(50) })), wrap(async (req, res) => {
+  ok(await supabase.from('rider_zones').delete().eq('partner_id', req.params.id));
+  if (req.body.zone_ids.length) {
+    const r = await supabase.from('rider_zones').insert(req.body.zone_ids.map((zone_id) => ({ partner_id: req.params.id, zone_id })));
+    if (r.error?.code === '23503') throw fail('One of those zones no longer exists');
+    if (r.error) throw r.error;
+  }
   res.json({ ok: true });
 }));
 

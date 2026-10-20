@@ -13,4 +13,7 @@ const RIDER_STEPS = {
 };
 const riderCanDo = (step, orderStatus, deliveryStatus) => !!RIDER_STEPS[step] && RIDER_STEPS[step][0] === orderStatus && RIDER_STEPS[step][1] === deliveryStatus;
 
-module.exports = { ADMIN_FLOW, CANCELLABLE, adminCanMove, RIDER_STEPS, riderCanDo };
+// Zone rule: a rider with no zones sees every area; a restaurant with no zone is visible to every rider.
+const inZones = (riderZones, restaurantZone) => !riderZones.length || !restaurantZone || riderZones.includes(restaurantZone);
+
+module.exports = { inZones, ADMIN_FLOW, CANCELLABLE, adminCanMove, RIDER_STEPS, riderCanDo };

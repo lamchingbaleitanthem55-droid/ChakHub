@@ -46,12 +46,30 @@ function formModal(title, fields, vals, onSave) {
     const out = {};
     try { fields.forEach((f) => {
       const el = $('#f-' + f.name), raw = f.type === 'checkbox' ? el.checked : el.value.trim();
-      out[f.name] = f.type === 'number' ? (raw === '' ? null : Number(raw)) : f.type === 'tags' ? raw.split(',').map((x) => x.trim()).filter(Boolean) : f.type === 'cust' ? parseCust(raw) : raw;
+      out[f.name] = f.type === 'number' ? (raw === '' ? null : Number(raw)) : f.type === 'tags' ? raw.split(',').map((x) => x.trim()).filter(Boolean) : f.type === 'cust' ? parseCust(raw) : (f.nullable && raw === '' ? null : raw);
     }); } catch (er) { return App.toast(er.message, 'error'); }
     const b = $('#f .btn:not(.ghost)'); b.disabled = true;
     try { await onSave(out); d.close(); } catch (er) { App.toast(er.message, 'error'); b.disabled = false; }
   };
   d.showModal();
+  if ($('#f-latitude') && $('#f-longitude')) attachGeoPicker();
+}
+// Tap the map to fill in a place's latitude and longitude.
+async function attachGeoPicker() {
+  const lat = $('#f-latitude'), lng = $('#f-longitude');
+  const wrap = document.createElement('div');
+  wrap.innerHTML = '<div class="sub" style="margin-bottom:6px">Tap the map to set the location, or type the numbers above.</div><div id="gpick" style="height:220px;border-radius:12px;margin-bottom:12px"></div>';
+  lng.closest('label').after(wrap);
+  try {
+    const L = await App.leaflet();
+    const has = lat.value && lng.value;
+    const map = L.map($('#gpick')).setView(has ? [+lat.value, +lng.value] : [24.817, 93.937], has ? 15 : 12); App.tiles(L).addTo(map);
+    let mk = null;
+    const put = (ll) => { mk ? mk.setLatLng(ll) : (mk = App.pin(L, ll, '#FC8019', 'Location').addTo(map)); };
+    if (has) put([+lat.value, +lng.value]);
+    map.on('click', (e) => { lat.value = e.latlng.lat.toFixed(6); lng.value = e.latlng.lng.toFixed(6); put([e.latlng.lat, e.latlng.lng]); });
+    setTimeout(() => map.invalidateSize(), 150);
+  } catch { $('#gpick').textContent = 'Map unavailable.'; }
 }
 const confirmDo = (msg, fn) => { if (confirm(msg)) guard(fn)(); };
 
@@ -86,15 +104,19 @@ const RF = [{ name: 'name', label: 'Name', required: true }, { name: 'descriptio
   { name: 'opening_time', label: 'Opens', type: 'time', required: true, def: '10:00' }, { name: 'closing_time', label: 'Closes', type: 'time', required: true, def: '22:00' },
   { name: 'delivery_fee', label: 'Delivery fee (₹)', type: 'number', required: true, def: 30 },
   { name: 'status', label: 'Status', type: 'select', options: [['active', 'Active'], ['inactive', 'Inactive']] }];
-let rests = [];
+const rf = () => [...RF, { name: 'zone_id', label: 'Delivery zone', type: 'select', nullable: true, options: [['', 'No zone (every rider can see it)'], ...zonesCache.map((z) => [z.id, z.name])] }];
+let rests = [], zonesCache = [], partnersCache = [];
+const zoneName = (id) => zonesCache.find((z) => z.id === id)?.name || '–';
+const loadZones = async () => { zonesCache = (await A('/zones').catch(() => ({ zones: [] }))).zones; };
 async function restaurants() {
   loading();
   try {
     ({ restaurants: rests } = await A('/restaurants'));
+    await loadZones();
     V.innerHTML = `<div class="bar"><h1>Restaurants</h1><button class="btn" id="add"><i class="fa-solid fa-plus"></i> Add restaurant</button></div>
-      <div class="box tw">${rests.length ? `<table><tr><th>Name</th><th>Cuisine</th><th>Hours</th><th>Fee</th><th>Status</th><th></th></tr>${rests.map((r) => `<tr><td><b>${esc(r.name)}</b><div class="sub">${esc(r.address)}</div></td><td>${esc(r.cuisine.join(', '))}</td><td>${esc(r.opening_time?.slice(0, 5))}–${esc(r.closing_time?.slice(0, 5))}</td><td>${rupee(r.delivery_fee)}</td><td>${pill(r.status)}</td>
+      <div class="box tw">${rests.length ? `<table><tr><th>Name</th><th>Cuisine</th><th>Zone</th><th>Hours</th><th>Fee</th><th>Status</th><th></th></tr>${rests.map((r) => `<tr><td><b>${esc(r.name)}</b><div class="sub">${esc(r.address)}</div></td><td>${esc(r.cuisine.join(', '))}</td><td>${esc(zoneName(r.zone_id))}</td><td>${esc(r.opening_time?.slice(0, 5))}–${esc(r.closing_time?.slice(0, 5))}</td><td>${rupee(r.delivery_fee)}</td><td>${pill(r.status)}</td>
         <td class="act"><button class="btn sm ghost" data-a="edit" data-id="${r.id}">Edit</button><button class="btn sm ghost" data-a="toggle" data-id="${r.id}">${r.status === 'active' ? 'Deactivate' : 'Activate'}</button><button class="btn sm bad" data-a="del" data-id="${r.id}">Delete</button></td></tr>`).join('')}</table>` : empty('No restaurants yet. Add your first one.')}</div>`;
-    $('#add').onclick = () => formModal('Add restaurant', RF, {}, async (b) => { await A('/restaurants', { method: 'POST', body: b }); App.toast('Restaurant added'); restaurants(); });
+    $('#add').onclick = () => formModal('Add restaurant', rf(), {}, async (b) => { await A('/restaurants', { method: 'POST', body: b }); App.toast('Restaurant added'); restaurants(); });
   } catch { failed(restaurants); }
 }
 
@@ -189,10 +211,11 @@ async function partners(quiet) {
   if (!quiet) loading();
   try {
     const { partners: ps } = await A('/partners');
+    partnersCache = ps; await loadZones();
     const b = (id, s, t, c = '') => `<button class="btn sm ${c}" data-a="pstatus" data-id="${id}" data-s="${s}">${t}</button>`;
     ps.forEach((p) => { cachedAvail[p.id] = p.availability; });
-    V.innerHTML = `<h1>Delivery partners</h1><div class="box" style="margin-bottom:16px"><h3>Live map</h3><div id="pmap" style="height:300px;border-radius:12px"></div><div class="sub" id="pmapnote"></div></div><div class="box tw">${ps.length ? `<table><tr><th>Name</th><th>Contact</th><th>Vehicle</th><th>Approval</th><th>Availability</th><th></th></tr>${ps.map((p) => `<tr><td>${esc(p.users?.name)}</td><td>${esc(p.users?.phone)}<div class="sub">${esc(p.users?.email)}</div></td><td>${esc(p.vehicle_type)}</td><td>${pill(p.approval_status)}</td>
-      <td><span class="pill ${p.availability === 'online' ? 'good' : 'grey'}">${esc(p.availability)}</span></td><td class="act">${p.approval_status === 'approved' ? b(p.id, 'suspended', 'Suspend', 'bad') : b(p.id, 'approved', 'Approve', 'good')}${p.approval_status === 'pending' ? b(p.id, 'rejected', 'Reject', 'bad') : ''}</td></tr>`).join('')}</table>` : empty('No delivery partners have signed up yet.')}</div>`;
+    V.innerHTML = `<h1>Delivery partners</h1><div class="box" style="margin-bottom:16px"><h3>Live map</h3><div id="pmap" style="height:300px;border-radius:12px"></div><div class="sub" id="pmapnote"></div></div><div class="box tw">${ps.length ? `<table><tr><th>Name</th><th>Contact</th><th>Vehicle</th><th>Zones</th><th>Approval</th><th>Availability</th><th></th></tr>${ps.map((p) => `<tr><td>${esc(p.users?.name)}</td><td>${esc(p.users?.phone)}<div class="sub">${esc(p.users?.email)}</div></td><td>${esc(p.vehicle_type)}</td><td>${esc((p.rider_zones || []).map((r) => zoneName(r.zone_id)).filter((n) => n !== '–').join(', ') || 'All areas')}</td><td>${pill(p.approval_status)}</td>
+      <td><span class="pill ${p.availability === 'online' ? 'good' : 'grey'}">${esc(p.availability)}</span></td><td class="act"><button class="btn sm ghost" data-a="pzones" data-id="${p.id}">Zones</button>${p.approval_status === 'approved' ? b(p.id, 'suspended', 'Suspend', 'bad') : b(p.id, 'approved', 'Approve', 'good')}${p.approval_status === 'pending' ? b(p.id, 'rejected', 'Reject', 'bad') : ''}</td></tr>`).join('')}</table>` : empty('No delivery partners have signed up yet.')}</div>`;
     drawPartnerMap(ps);
   } catch { if (!quiet) failed(partners); }
 }
@@ -205,6 +228,79 @@ async function complaints() {
     V.innerHTML = `<h1>Customer complaints</h1><div class="box tw">${cs.length ? `<table><tr><th>Customer</th><th>Order</th><th>Message</th><th>Received</th><th>Status</th><th></th></tr>${cs.map((c) => `<tr><td>${esc(c.users?.name)}<div class="sub">${esc(c.users?.phone)}</div></td><td>${c.order_id ? shortId(c.order_id) : '–'}</td><td style="max-width:320px">${esc(c.message)}</td><td>${when(c.created_at)}</td><td>${pill(c.status === 'open' ? 'pending_payment' : 'delivered').replace(/Awaiting payment|Delivered/, c.status === 'open' ? 'Open' : 'Resolved')}</td>
       <td>${c.status === 'open' ? `<button class="btn sm good" data-a="cresolve" data-id="${c.id}">Mark resolved</button>` : ''}</td></tr>`).join('')}</table>` : empty('No complaints. Nice.')}</div>`;
   } catch { failed(complaints); }
+}
+
+// ---------- Delivery zones ----------
+const ZCOLORS = ['#FC8019', '#1a8f4c', '#2b7de9', '#9b59b6', '#e6b800', '#d6336c'];
+let zmap = null;
+async function drawZonesMap(zs, rs, ps) {
+  const el = $('#zmap'); if (!el) return;
+  try {
+    const L = await App.leaflet();
+    if (zmap) zmap.remove();
+    zmap = L.map(el).setView([24.817, 93.937], 12); App.tiles(L).addTo(zmap);
+    const boxes = [];
+    zs.forEach((z, i) => {
+      if (z.latitude == null) return;
+      const c = L.circle([z.latitude, z.longitude], { radius: Number(z.radius_km) * 1000, color: ZCOLORS[i % ZCOLORS.length], weight: 2, fillOpacity: 0.12 }).bindTooltip(z.name, { sticky: true }).addTo(zmap);
+      boxes.push(c.getBounds());
+    });
+    rs.filter((r) => r.latitude != null && r.longitude != null).forEach((r) => { App.pin(L, [r.latitude, r.longitude], '#222222', `${r.name} · ${zoneName(r.zone_id)}`).addTo(zmap); boxes.push(L.latLngBounds([[r.latitude, r.longitude]])); });
+    ps.filter((p) => p.current_latitude != null).forEach((p) => { App.pin(L, [p.current_latitude, p.current_longitude], '#FC8019', p.users?.name || 'Rider').addTo(zmap); });
+    if (boxes.length) zmap.fitBounds(boxes.reduce((acc, b) => acc.extend(b)), { padding: [30, 30], maxZoom: 15 });
+    const noGeo = rs.filter((r) => r.latitude == null).length;
+    $('#zmapnote').textContent = `Coloured circles are zones, dark dots are restaurants, orange dots are riders on a delivery.${noGeo ? ` ${noGeo} restaurant${noGeo > 1 ? 's have' : ' has'} no location yet, so ${noGeo > 1 ? 'they are' : 'it is'} not shown (set it on the Restaurants page).` : ''}`;
+  } catch { const n = $('#zmapnote'); if (n) n.textContent = 'Map unavailable right now.'; }
+}
+
+// Add / edit a zone: name, radius, and the centre chosen by tapping the map.
+async function zoneDialog(z) {
+  const d = $('#dlg'); const edit = !!z;
+  let center = z && z.latitude != null ? [z.latitude, z.longitude] : null;
+  d.innerHTML = `<form id="zf"><h3>${edit ? 'Edit zone' : 'Add zone'}</h3>
+    <label>Zone name<input id="zn" required maxlength="40" value="${esc(z?.name || '')}" placeholder="e.g. Paona Bazar"></label>
+    <label>Radius (km)<input id="zr" type="number" min="0.2" max="50" step="0.1" value="${esc(z?.radius_km ?? 2)}"></label>
+    <div class="sub" style="margin-bottom:6px">Tap the map to place the centre of the zone. The circle shows the area.</div>
+    <div id="zpick" style="height:260px;border-radius:12px;margin-bottom:12px"></div>
+    <div class="actions"><button type="button" class="btn ghost" id="cx">Cancel</button><button class="btn">Save</button></div></form>`;
+  $('#cx').onclick = () => d.close();
+  d.showModal();
+  try {
+    const L = await App.leaflet();
+    const map = L.map($('#zpick')).setView(center || [24.817, 93.937], center ? 13 : 12); App.tiles(L).addTo(map);
+    let circle = null;
+    const draw = () => {
+      if (!center) return;
+      const m = (Number($('#zr').value) || 2) * 1000;
+      circle ? (circle.setLatLng(center), circle.setRadius(m)) : (circle = L.circle(center, { radius: m, color: '#FC8019', weight: 2, fillOpacity: 0.15 }).addTo(map));
+    };
+    map.on('click', (e) => { center = [e.latlng.lat, e.latlng.lng]; draw(); });
+    $('#zr').oninput = draw; draw();
+    setTimeout(() => map.invalidateSize(), 150);
+  } catch { $('#zpick').textContent = 'Map unavailable. You can still save the name.'; }
+  $('#zf').onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { name: $('#zn').value.trim() };
+    if (center) { body.latitude = center[0]; body.longitude = center[1]; body.radius_km = Number($('#zr').value) || 2; }
+    try { edit ? await A('/zones/' + z.id, { method: 'PATCH', body }) : await A('/zones', { method: 'POST', body }); d.close(); App.toast('Zone saved'); zones(); }
+    catch (er) { App.toast(er.message, 'error'); }
+  };
+}
+
+async function zones() {
+  loading();
+  try {
+    const [zr, rr, pr] = await Promise.all([A('/zones'), A('/restaurants'), A('/partners')]);
+    const zs = zr.zones; zonesCache = zs; rests = rr.restaurants;
+    V.innerHTML = `<div class="bar"><h1>Delivery zones</h1><button class="btn" id="add"><i class="fa-solid fa-plus"></i> Add zone</button></div>
+      <p class="sub" style="margin:-8px 0 16px">A zone is an area of your city, such as “Paona Bazar”. Draw it on the map, put each restaurant in a zone (Restaurants page), then choose each rider’s zones (Delivery Partners page). Riders only see ready orders from their zones. A rider with no zones sees every area, and a restaurant with no zone is visible to every rider.</p>
+      <div class="box" style="margin-bottom:16px"><div id="zmap" style="height:360px;border-radius:12px"></div><div class="sub" id="zmapnote" style="margin-top:6px"></div></div>
+      <div class="box tw">${zs.length ? `<table><tr><th>Zone</th><th>Map area</th><th>Restaurants</th><th>Riders</th><th></th></tr>${zs.map((z, i) => `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${ZCOLORS[i % ZCOLORS.length]};margin-right:6px"></span><b>${esc(z.name)}</b></td>
+        <td>${z.latitude != null ? esc(z.radius_km) + ' km radius' : '<span class="sub">Not drawn yet</span>'}</td><td>${z.restaurants}</td><td>${z.riders}</td>
+        <td class="act"><button class="btn sm ghost" data-a="zedit" data-id="${z.id}">Edit / draw</button><button class="btn sm bad" data-a="zdel" data-id="${z.id}">Delete</button></td></tr>`).join('')}</table>` : empty('No zones yet. Add your first one.')}</div>`;
+    $('#add').onclick = () => zoneDialog(null);
+    drawZonesMap(zs, rr.restaurants, pr.partners);
+  } catch { failed(zones); }
 }
 
 // ---------- Earnings ----------
@@ -253,7 +349,7 @@ V.addEventListener('click', (e) => {
   const b = e.target.closest('[data-a]'); if (!b) return;
   const { a, id, s } = b.dataset, g = guard;
   if (a === 'edit') { const route = location.hash;
-    if (route === '#/restaurants') { const r = rests.find((x) => x.id === id); formModal('Edit restaurant', RF, r, async (v) => { await A('/restaurants/' + id, { method: 'PATCH', body: v }); App.toast('Saved'); restaurants(); }); }
+    if (route === '#/restaurants') { const r = rests.find((x) => x.id === id); formModal('Edit restaurant', rf(), r, async (v) => { await A('/restaurants/' + id, { method: 'PATCH', body: v }); App.toast('Saved'); restaurants(); }); }
     else { const f = foods.find((x) => x.id === id); formModal('Edit dish', FF(rests), f, async (v) => { await A('/foods/' + id, { method: 'PATCH', body: v }); App.toast('Saved'); foodsView(); }); } }
   else if (a === 'toggle') { const r = rests.find((x) => x.id === id), to = r.status === 'active' ? 'inactive' : 'active';
     confirmDo(`${to === 'inactive' ? 'Deactivate' : 'Activate'} ${r.name}? ${to === 'inactive' ? 'Customers will stop seeing it.' : ''}`, async () => { await A('/restaurants/' + id, { method: 'PATCH', body: { status: to } }); restaurants(); }); }
@@ -271,11 +367,20 @@ V.addEventListener('click', (e) => {
     $('#cx').onclick = () => d.close(); d.showModal(); })();
   else if (a === 'pstatus') confirmDo(`Set this rider to "${s}"?`, async () => { await A('/partners/' + id, { method: 'PATCH', body: { approval_status: s } }); partners(); });
   else if (a === 'cresolve') g(async () => { await A('/complaints/' + id, { method: 'PATCH', body: { status: 'resolved' } }); complaints(); })();
+  else if (a === 'zedit') zoneDialog(zonesCache.find((x) => x.id === id));
+  else if (a === 'zdel') confirmDo('Delete this zone? Restaurants in it become "no zone", and riders lose it.', async () => { await A('/zones/' + id, { method: 'DELETE' }); App.toast('Deleted'); zones(); });
+  else if (a === 'pzones') {
+    const p = partnersCache.find((x) => x.id === id);
+    if (!zonesCache.length) return App.toast('Create a zone first on the Zones page', 'error');
+    const have = new Set((p.rider_zones || []).map((r) => r.zone_id));
+    formModal(`Zones for ${p.users?.name || 'rider'} (none ticked = all areas)`, zonesCache.map((z) => ({ name: 'z_' + z.id, label: z.name, type: 'checkbox' })), Object.fromEntries(zonesCache.map((z) => ['z_' + z.id, have.has(z.id)])),
+      async (b) => { await A(`/partners/${id}/zones`, { method: 'PATCH', body: { zone_ids: zonesCache.filter((z) => b['z_' + z.id]).map((z) => z.id) } }); App.toast('Zones saved'); partners(); });
+  }
   else if (a === 'ctoggle') g(async () => { await A('/coupons/' + id, { method: 'PATCH', body: { active: s === '1' } }); coupons(); })();
 });
 
 // ---------- routing, new-order alerts, startup ----------
-const ROUTES = { '': dashboard, restaurants, foods: foodsView, orders: () => ordersView(), customers, partners, earnings, coupons, settings, complaints };
+const ROUTES = { '': dashboard, restaurants, foods: foodsView, orders: () => ordersView(), customers, partners, earnings, coupons, settings, complaints, zones };
 function route() {
   const r = location.hash.replace(/^#\/?/, '');
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('on', (a.dataset.r === 'dashboard' ? '' : a.dataset.r) === r));

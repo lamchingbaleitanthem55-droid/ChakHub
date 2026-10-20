@@ -54,6 +54,19 @@ async function drawRiderMap(o) {
   } catch { el.parentElement.classList.add('hidden'); }
 }
 
+// ---------- map of the rider's zones ----------
+let zoneMap = null;
+async function drawZoneMap(areas) {
+  const el = $('#zmap'); if (!el || !areas || !areas.length) return;
+  try {
+    const L = await App.leaflet();
+    if (zoneMap) zoneMap.remove();
+    zoneMap = L.map(el, { zoomControl: false }).setView([areas[0].lat, areas[0].lng], 13); App.tiles(L).addTo(zoneMap);
+    const boxes = areas.map((a) => L.circle([a.lat, a.lng], { radius: a.radius_km * 1000, color: '#FC8019', weight: 2, fillOpacity: 0.12 }).bindTooltip(a.name).addTo(zoneMap).getBounds());
+    zoneMap.fitBounds(boxes.reduce((acc, b) => acc.extend(b)), { padding: [20, 20] });
+  } catch { el.parentElement.classList.add('hidden'); }
+}
+
 // ---------- Dashboard ----------
 async function dashboard(quiet) {
   if (!quiet) loading();
@@ -65,10 +78,13 @@ async function dashboard(quiet) {
     V.innerHTML = `<h1>Hi, ${esc(d.user.name.split(' ')[0])} 👋</h1>
       <button class="switch ${online ? 'on' : ''}" id="tog" role="switch" aria-checked="${online}"><span>${online ? 'You’re online' : 'You’re offline'}</span><span class="knob"></span></button>
       <p class="sub" style="margin:8px 4px 16px">${online ? 'You’ll see new delivery requests as they come in.' : 'Go online to receive delivery requests.'}</p>
+      <p class="sub" style="margin:-8px 4px 16px"><i class="fa-solid fa-location-dot"></i> ${d.zones && d.zones.length ? 'Your zones: ' + esc(d.zones.join(', ')) : 'You can take orders from all areas'}</p>
+      ${d.zone_areas && d.zone_areas.length ? '<div class="card" style="padding:0;overflow:hidden"><div id="zmap" style="height:200px"></div></div>' : ''}
       ${d.has_active ? '<a class="card" href="#/active" style="display:block;border-color:var(--brand)"><b>You have an active delivery</b><div class="sub">Tap to continue →</div></a>'
         : online && d.waiting ? `<a class="card" href="#/requests" style="display:block;border-color:var(--ok)"><b>${d.waiting} order${d.waiting > 1 ? 's' : ''} waiting for pickup</b><div class="sub">Tap to view →</div></a>` : ''}
       <div class="grid"><div class="stat"><span>Today</span><b>${rupee(d.stats.today)}</b></div><div class="stat"><span>Total earned</span><b>${rupee(d.stats.total)}</b></div>
         <div class="stat"><span>Deliveries done</span><b>${d.stats.completed}</b></div><div class="stat"><span>Vehicle</span><b style="font-size:1rem;text-transform:capitalize">${esc(d.partner.vehicle_type)}</b></div></div>`;
+    drawZoneMap(d.zone_areas);
     $('#tog').onclick = async (e) => {
       e.currentTarget.disabled = true;
       try { await R('/availability', { method: 'PATCH', body: { availability: online ? 'offline' : 'online' } }); } catch (er) { App.toast(er.message, 'error'); }

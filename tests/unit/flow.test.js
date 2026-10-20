@@ -32,3 +32,13 @@ test('a rider cannot skip steps (e.g. complete without arriving, or pick up with
   assert.equal(riderCanDo('nonsense', 'placed', 'assigned'), false);
   assert.deepEqual(Object.keys(RIDER_STEPS), ['arrived_restaurant', 'pickup', 'start_delivery', 'arrived_customer', 'complete']);
 });
+
+const { inZones } = require('../../backend/services/orderFlow');
+test('delivery zones: riders only see their zones; no zone on either side means everyone', () => {
+  assert.equal(inZones(['A'], 'A'), true);
+  assert.equal(inZones(['A', 'B'], 'B'), true);
+  assert.equal(inZones(['A'], 'B'), false);   // outside the rider's zone
+  assert.equal(inZones([], 'B'), true);       // rider with no zones covers every area
+  assert.equal(inZones(['A'], null), true);   // restaurant with no zone is visible to all
+  assert.equal(inZones(['A'], undefined), true);
+});

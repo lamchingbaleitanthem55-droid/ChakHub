@@ -1,4 +1,4 @@
-# ChakHub: food delivery platform
+# Zestly: food delivery platform
 
 A complete food delivery system with **three connected panels** (customer, admin, delivery partner) on one backend and one database, in the style of Zomato / Swiggy.
 
@@ -22,6 +22,8 @@ You need **Node.js 22 or newer** (nodejs.org, LTS) and a free **Supabase** proje
    3. `database/phase6_realtime.sql` (instant updates)
    4. `database/phase7_payments.sql` (online payments)
    5. `database/phase8.sql` (image uploads)
+   6. `database/phase9_zones.sql` (delivery zones)
+   7. `database/phase10_zone_map.sql` (zone maps)
 2. **Keys.** Copy `.env.example` to `.env` (create it as a *file* named `.env` in the project folder). Fill in the three Supabase values from *Project Settings → API*. The URL must end at `.supabase.co`.
 3. **Install and seed.**
    ```
@@ -65,7 +67,7 @@ For `e2e`: run `npm run seed`, start the server (`npm start`), put the seed pass
 4. In Supabase: *Authentication → URL Configuration*, set **Site URL** to your Render URL and add it under **Redirect URLs** (needed for the password-reset email).
 5. Switch Razorpay to Live keys only after completing their KYC and testing end to end.
 
-**Docker / any host.** `docker build -t ChakHub .` then run with the same env vars and port 3000. Always serve over **HTTPS**: browsers only allow location sharing on secure pages (localhost counts as secure).
+**Docker / any host.** `docker build -t zestly .` then run with the same env vars and port 3000. Always serve over **HTTPS**: browsers only allow location sharing on secure pages (localhost counts as secure).
 
 **Before real customers**
 - Rotate your Supabase and Razorpay keys if they were ever pasted anywhere public.

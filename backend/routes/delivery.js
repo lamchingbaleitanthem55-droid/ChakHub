@@ -19,6 +19,8 @@ const uuid = (req, res, next) => /^[0-9a-f-]{36}$/i.test(req.params.id) ? next()
 const ist = (d) => new Date(new Date(d).getTime() + 5.5 * 3600e3).toISOString().slice(0, 10);
 const area = (a) => a.full_address.split(',').slice(-2).join(',').trim() || a.label; // customers' exact address stays hidden until you accept
 
+const riderZoneIds = async (partnerId) => ok(await supabase.from('rider_zones').select('zone_id').eq('partner_id', partnerId)).map((r) => r.zone_id);
+
 async function activeOrder(partnerId) {
   const data = ok(await supabase.from('orders').select('id,customer_id,order_status,items,address,delivery_instructions,total,delivery_fee,payment_method,payment_status,restaurants(name,address,phone,latitude,longitude),users(name,phone)')
     .eq('delivery_partner_id', partnerId).in('order_status', ACTIVE).limit(1));
@@ -44,8 +46,12 @@ router.get('/dashboard', wrap(async (req, res) => {
     earningsData(req.partner.id), activeOrder(req.partner.id),
   ]);
   let waiting = 0;
-  if (partner.availability === 'online' && !act) waiting = (await supabase.from('orders').select('id', { count: 'exact', head: true }).eq('order_status', 'ready').is('delivery_partner_id', null)).count || 0;
-  res.json({ user, partner, stats: { today: e.today, total: e.total, completed: e.count }, has_active: !!act, waiting });
+  const mine = await riderZoneIds(req.partner.id);
+  if (partner.availability === 'online' && !act) waiting = ok(await supabase.from('orders').select('id,restaurants(zone_id)').eq('order_status', 'ready').is('delivery_partner_id', null).limit(200)).filter((o) => inZones(mine, o.restaurants?.zone_id)).length;
+  const zrows = ok(await supabase.from('rider_zones').select('zones(name,latitude,longitude,radius_km)').eq('partner_id', req.partner.id)).map((r) => r.zones).filter(Boolean);
+  const zones = zrows.map((z) => z.name);
+  const zone_areas = zrows.filter((z) => z.latitude != null && z.longitude != null && z.radius_km != null).map((z) => ({ name: z.name, lat: z.latitude, lng: z.longitude, radius_km: Number(z.radius_km) }));
+  res.json({ user, partner, stats: { today: e.today, total: e.total, completed: e.count }, has_active: !!act, waiting, zones, zone_areas });
 }));
 
 router.patch('/availability', validate(z.object({ availability: z.enum(['online', 'offline']) })), wrap(async (req, res) => {
@@ -59,15 +65,18 @@ router.patch('/availability', validate(z.object({ availability: z.enum(['online'
 router.get('/requests', wrap(async (req, res) => {
   const online = (await myStatus(req.partner.id)) === 'online';
   if (!online || await activeOrder(req.partner.id)) return res.json({ requests: [], online });
-  const rows = ok(await supabase.from('orders').select('id,delivery_fee,address,created_at,payment_method,total,restaurants(name,address)')
-    .eq('order_status', 'ready').is('delivery_partner_id', null).order('created_at').limit(20));
-  res.json({ online, requests: rows.map((o) => ({ id: o.id, restaurant: o.restaurants?.name, pickup: o.restaurants?.address, drop_area: area(o.address),
+  const rows = ok(await supabase.from('orders').select('id,delivery_fee,address,created_at,payment_method,total,restaurants(name,address,zone_id)')
+    .eq('order_status', 'ready').is('delivery_partner_id', null).order('created_at').limit(50));
+  const zones = await riderZoneIds(req.partner.id);
+  res.json({ online, requests: rows.filter((o) => inZones(zones, o.restaurants?.zone_id)).map((o) => ({ id: o.id, restaurant: o.restaurants?.name, pickup: o.restaurants?.address, drop_area: area(o.address),
     payout: payout(o), cash: o.payment_method === 'cod' ? Number(o.total) : 0, ready_since: o.created_at })) });
 }));
 
 router.post('/requests/:id/accept', uuid, wrap(async (req, res) => {
   if ((await myStatus(req.partner.id)) !== 'online') throw fail('Go online to accept deliveries');
   if (await activeOrder(req.partner.id)) throw fail('Finish your current delivery first', 409);
+  const target = ok(await supabase.from('orders').select('restaurants(zone_id)').eq('id', req.params.id).maybeSingle()); // enforced here too, not just in the list
+  if (target && !inZones(await riderZoneIds(req.partner.id), target.restaurants?.zone_id)) throw fail('This order is outside your delivery zone', 403);
   // One atomic UPDATE: it only matches while the order is still "ready" and unclaimed, so exactly one rider can win.
   const won = ok(await supabase.from('orders').update({ delivery_partner_id: req.partner.id, order_status: 'partner_assigned' })
     .eq('id', req.params.id).eq('order_status', 'ready').is('delivery_partner_id', null).select('id,customer_id'));
@@ -87,7 +96,7 @@ router.get('/active', wrap(async (req, res) => {
   res.json({ order: o, step: d?.status || 'assigned', payout: payout(o), cash: o.payment_method === 'cod' ? Number(o.total) : 0 });
 }));
 
-const { RIDER_STEPS: STEPS } = require('./../services/orderFlow');
+const { RIDER_STEPS: STEPS, inZones } = require('./../services/orderFlow');
 const TEXT = { picked_up: ['Order picked up', 'Your food is with the delivery partner.'], out_for_delivery: ['Out for delivery', 'Your delivery partner is on the way.'], delivered: ['Order delivered', 'Enjoy your meal!'] };
 const tries = new Map(); // orderId -> wrong-code counter (resets on server restart)
 
