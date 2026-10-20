@@ -98,33 +98,15 @@ router.patch('/foods/:id', uuid, validate(foodSchema.partial()), nonEmpty, wrap(
 router.delete('/foods/:id', uuid, wrap(async (req, res) => { ok(await supabase.from('food_items').delete().eq('id', req.params.id)); res.json({ ok: true }); }));
 
 // ---------- Orders ----------
+const ALL_STATUSES = ['pending_payment', 'placed', 'accepted', 'preparing', 'ready', 'partner_assigned', 'picked_up', 'out_for_delivery', 'delivered', 'cancelled', 'rejected'];
 const ORDER_SELECT = '*, users(name,phone,email), restaurants(name,phone), delivery_partners(vehicle_type, users(name,phone))';
 router.get('/orders', wrap(async (req, res) => {
   let q = supabase.from('orders').select(ORDER_SELECT).order('created_at', { ascending: false }).limit(100);
-  if (req.query.status && req.query.status !== 'all') q = q.eq('order_status', String(req.query.status));
+  const wanted = String(req.query.status || 'all');
+  if (wanted !== 'all') q = q.in('order_status', wanted.split(',').filter((s) => ALL_STATUSES.includes(s))); // one status or a comma-separated group
   const orders = ok(await q);
   orders.forEach((o) => delete o.delivery_otp); // the OTP belongs to the customer, not the admin
   res.json({ orders });
-}));
-
-// Manual UPI confirmation: admin must check the actual payment in the receiving UPI app first.
-router.post('/orders/:id/verify-upi', uuid, validate(z.object({ transaction_reference: z.string().trim().min(4).max(100) })), wrap(async (req, res) => {
-  const ref = req.body.transaction_reference.trim();
-  const o = ok(await supabase.from('orders').select('id,customer_id,total,payment_method,payment_status,order_status').eq('id', req.params.id).maybeSingle());
-  if (!o) throw fail('Order not found', 404);
-  if (o.payment_method !== 'upi') throw fail('This is not a direct UPI order', 400);
-  if (o.payment_status === 'paid') return res.json({ ok: true, already_paid: true });
-  if (o.order_status !== 'pending_payment') throw fail('This order is no longer awaiting payment', 409);
-  const payment = ok(await supabase.from('payments').select('id').eq('order_id', o.id).maybeSingle());
-  if (!payment) throw fail('Payment record not found', 404);
-  const saved = await supabase.from('payments').update({ payment_status: 'paid', payment_gateway_reference: ref }).eq('order_id', o.id).eq('payment_status', 'pending');
-  if (saved.error?.code === '23505') throw fail('This UPI transaction reference has already been used', 409);
-  if (saved.error) throw saved.error;
-  const moved = ok(await supabase.from('orders').update({ payment_status: 'paid', order_status: 'placed' }).eq('id', o.id).eq('order_status', 'pending_payment').eq('payment_status', 'pending').select('id'));
-  if (!moved.length) throw fail('Order changed while verifying. Refresh and try again.', 409);
-  await supabase.from('order_status_history').insert({ order_id: o.id, status: 'placed', changed_by: req.user.id });
-  await supabase.from('notifications').insert({ user_id: o.customer_id, title: 'UPI payment verified', message: 'Your payment has been verified and your order has been sent to the restaurant.' });
-  res.json({ ok: true });
 }));
 
 const MSG = { accepted: ['Order accepted', 'The restaurant accepted your order.'], rejected: ['Order rejected', 'Sorry, the restaurant couldn’t take your order.'],

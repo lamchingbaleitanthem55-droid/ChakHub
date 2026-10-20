@@ -62,7 +62,12 @@ async function dashboard(quiet) {
     const s = await A('/stats');
     const max = Math.max(1, ...s.chart.map((c) => c.revenue));
     const bars = s.chart.map((c, i) => { const h = Math.round((c.revenue / max) * 110); return `<g><rect x="${20 + i * 76}" y="${130 - h}" width="48" height="${h}" rx="6" fill="#FC8019"/><text x="${44 + i * 76}" y="148" text-anchor="middle" font-size="11" fill="currentColor">${esc(c.day.slice(5))}</text><text x="${44 + i * 76}" y="${124 - h}" text-anchor="middle" font-size="10" fill="currentColor">${c.revenue ? Math.round(c.revenue) : ''}</text></g>`; }).join('');
-    const card = (l, v) => `<div class="stat"><span>${l}</span><b>${v}</b></div>`;
+    // Each card still shows its number, and is also a button that opens the matching page.
+    const GO = { 'Customers': ['#/customers'], 'Restaurants': ['#/restaurants'], 'Total orders': ['#/orders', 'all'], 'Pending': ['#/orders', 'placed'],
+      'Preparing': ['#/orders', 'accepted,preparing,ready'], 'Out for delivery': ['#/orders', 'partner_assigned,picked_up,out_for_delivery'],
+      'Completed': ['#/orders', 'delivered'], 'Cancelled': ['#/orders', 'cancelled,rejected'], 'Total revenue': ['#/earnings'], 'Today’s revenue': ['#/earnings'],
+      'Platform commission': ['#/earnings'], 'Delivery earnings': ['#/earnings'], 'Riders online': ['#/partners'] };
+    const card = (l, v) => { const [href, f] = GO[l] || ['#/']; return `<a class="stat link" href="${href}"${f ? ` data-filter="${f}"` : ''} aria-label="${l}: ${v}. Open"><span>${l}</span><b>${v}</b></a>`; };
     V.innerHTML = `<h1>Dashboard</h1><div class="cards">
       ${card('Customers', s.customers)}${card('Restaurants', s.restaurants)}${card('Total orders', s.counts.total)}${card('Pending', s.counts.pending)}
       ${card('Preparing', s.counts.preparing)}${card('Out for delivery', s.counts.out)}${card('Completed', s.counts.completed)}${card('Cancelled', s.counts.cancelled)}
@@ -70,7 +75,7 @@ async function dashboard(quiet) {
       ${card('Delivery earnings', rupee(s.revenue.delivery_earnings))}${card('Riders online', s.partners.online + ' / ' + s.partners.total)}</div>
       <div class="two"><div class="box"><h3>Revenue, last 7 days</h3><svg class="chart" viewBox="0 0 550 155" role="img" aria-label="Revenue chart">${bars}</svg></div>
       <div class="box"><h3>Restaurant performance</h3>${s.performance.length ? `<div class="tw"><table><tr><th>Restaurant</th><th>Delivered</th><th>Revenue</th></tr>${s.performance.map((p) => `<tr><td>${esc(p.name)}</td><td>${p.orders}</td><td>${rupee(p.revenue)}</td></tr>`).join('')}</table></div>` : empty('No restaurants yet')}</div></div>
-      <div class="box"><h3>Recent orders</h3>${s.recent.length ? `<div class="tw"><table><tr><th>Order</th><th>Customer</th><th>Restaurant</th><th>Total</th><th>Status</th><th>Time</th></tr>${s.recent.map((o) => `<tr><td>${shortId(o.id)}</td><td>${esc(o.users?.name)}</td><td>${esc(o.restaurants?.name)}</td><td>${rupee(o.total)}</td><td>${pill(o.order_status)}</td><td>${when(o.created_at)}</td></tr>`).join('')}</table></div>` : empty('No orders yet')}</div>`;
+      <div class="box"><div class="bar" style="margin-bottom:8px"><h3 style="margin:0;flex:1">Recent orders</h3><a class="btn sm ghost" href="#/orders" data-filter="all">View all</a></div>${s.recent.length ? `<div class="tw"><table><tr><th>Order</th><th>Customer</th><th>Restaurant</th><th>Total</th><th>Status</th><th>Time</th></tr>${s.recent.map((o) => `<tr><td>${shortId(o.id)}</td><td>${esc(o.users?.name)}</td><td>${esc(o.restaurants?.name)}</td><td>${rupee(o.total)}</td><td>${pill(o.order_status)}</td><td>${when(o.created_at)}</td></tr>`).join('')}</table></div>` : empty('No orders yet')}</div>`;
   } catch { if (!quiet) failed(dashboard); }
 }
 
@@ -121,8 +126,7 @@ async function foodsView() {
 let ofilter = 'all', lastPlaced = null;
 const orderActions = (o) => {
   const b = (a, t, c = '') => `<button class="btn sm ${c}" data-a="${a}" data-id="${o.id}">${t}</button>`, s = o.order_status;
-  return (s === 'pending_payment' && o.payment_method === 'upi' && o.payment_status !== 'paid' ? b('verifyupi', 'Verify UPI', 'good') : '') +
-    (s === 'placed' ? b('accepted', 'Accept', 'good') + b('rejected', 'Reject', 'bad') : s === 'accepted' ? b('preparing', 'Start preparing')
+  return (s === 'placed' ? b('accepted', 'Accept', 'good') + b('rejected', 'Reject', 'bad') : s === 'accepted' ? b('preparing', 'Start preparing')
     : s === 'preparing' ? b('ready', 'Mark ready') : '') + b('detail', 'Details', 'ghost')
     + (['placed', 'accepted', 'preparing', 'ready', 'partner_assigned'].includes(s) && s !== 'placed' ? b('cancelled', 'Cancel', 'bad') : '')
     + (['cancelled', 'rejected'].includes(s) && o.payment_status === 'paid' && o.payment_method !== 'cod' ? b('refund', 'Refund', 'good') : '');
@@ -132,7 +136,7 @@ async function ordersView(quiet) {
   if (!quiet) loading();
   try {
     ({ orders: orderList } = await A('/orders?status=' + ofilter));
-    V.innerHTML = `<div class="bar"><h1>Orders</h1><select id="osel"><option value="all">All orders</option>${Object.entries(ST).map(([k, l]) => `<option value="${k}" ${k === ofilter ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    V.innerHTML = `<div class="bar"><h1>Orders</h1><select id="osel"><option value="all" ${ofilter === 'all' ? 'selected' : ''}>All orders</option>${[['accepted,preparing,ready', 'Preparing (all stages)'], ['partner_assigned,picked_up,out_for_delivery', 'Out for delivery (all stages)'], ['cancelled,rejected', 'Cancelled and rejected']].map(([k, l]) => `<option value="${k}" ${k === ofilter ? 'selected' : ''}>${l}</option>`).join('')}${Object.entries(ST).map(([k, l]) => `<option value="${k}" ${k === ofilter ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="box tw">${orderList.length ? `<table><tr><th>Order</th><th>Customer</th><th>Restaurant</th><th>Items</th><th>Total</th><th>Payment</th><th>Rider</th><th>Status</th><th></th></tr>${orderList.map((o) => `<tr><td>${shortId(o.id)}<div class="sub">${when(o.created_at)}</div></td><td>${esc(o.users?.name)}<div class="sub">${esc(o.users?.phone)}</div></td><td>${esc(o.restaurants?.name)}</td>
         <td>${esc(o.items.map((i) => i.qty + '× ' + i.name).join(', '))}</td><td>${rupee(o.total)}</td><td>${esc(o.payment_method.toUpperCase())}<div class="sub">${esc(o.payment_status)}</div></td>
         <td>${esc(o.delivery_partners?.users?.name || '–')}</td><td>${pill(o.order_status)}</td><td class="act">${orderActions(o)}</td></tr>`).join('')}</table>` : empty('No orders to show.')}</div>`;
@@ -242,6 +246,8 @@ async function settings() {
   } catch { failed(settings); }
 }
 
+V.addEventListener('click', (e) => { const a = e.target.closest('[data-filter]'); if (a) ofilter = a.dataset.filter; }); // dashboard cards pre-select the Orders filter
+
 // ---------- one click handler for all table buttons ----------
 V.addEventListener('click', (e) => {
   const b = e.target.closest('[data-a]'); if (!b) return;
@@ -255,14 +261,6 @@ V.addEventListener('click', (e) => {
     confirmDo(isR ? 'Delete this restaurant and all its dishes? This can’t be undone.' : 'Delete this dish?', async () => { await A((isR ? '/restaurants/' : '/foods/') + id, { method: 'DELETE' }); App.toast('Deleted'); isR ? restaurants() : foodsView(); }); }
   else if (a === 'avail') { const f = foods.find((x) => x.id === id); g(async () => { await A('/foods/' + id, { method: 'PATCH', body: { availability: !f.availability } }); foodsView(); })(); }
   else if (a === 'detail') orderDetail(orderList.find((x) => x.id === id));
-  else if (a === 'verifyupi') {
-    const o = orderList.find((x) => x.id === id);
-    formModal('Verify UPI payment', [{ name: 'transaction_reference', label: 'UPI transaction reference / UTR', required: true, ph: 'Check this in your UPI app before confirming' }], {}, async (v) => {
-      await A(`/orders/${id}/verify-upi`, { method: 'POST', body: v });
-      App.toast('UPI payment verified; order released to restaurant');
-      ordersView(true);
-    });
-  }
   else if (a === 'refund') confirmDo('Refund this payment to the customer’s original payment method?', async () => { const r = await A(`/orders/${id}/refund`, { method: 'POST' }); statusToast({ refund: r.refund }); ordersView(true); });
   else if (['accepted', 'preparing', 'ready'].includes(a)) g(async () => { statusToast(await setStatus(id, a)); ordersView(true); })();
   else if (a === 'rejected' || a === 'cancelled') formModal(a === 'rejected' ? 'Reject order' : 'Cancel order', [{ name: 'reason', label: 'Reason (the customer will see this)', type: 'textarea', required: true }], {},
